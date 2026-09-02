@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NESI_EDUC QCM</title>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+:root{--blue:#0a2a5a;--light:#e6f0ff;--green:#00c853}
+*{box-sizing:border-box;margin:0;padding:0;font-family:system-ui}
+body{background:#f5f8ff;color:#222}
+header{background:#0a2a5a;color:white;padding:18px;text-align:center;position:sticky;top:0;z-index:10;display:flex;flex-direction:column;align-items:center;gap:10px}
+.logo{width:90px;height:90px;border-radius:18px;background:white;padding:6px;object-fit:contain}
+#licenseBanner{background:#00c853;color:white;text-align:center;padding:10px;font-size:13px;font-weight:700;display:none}
+.container{max-width:700px;margin:0 auto;padding:16px}
+.card{background:white;border-radius:16px;padding:20px;box-shadow:0 8px 24px rgba(10,42,90,.08);margin-bottom:16px}
+.btn{width:100%;padding:16px;border:none;border-radius:12px;font-weight:700;font-size:16px;cursor:pointer}
+.btn-primary{background:#0a2a5a;color:white}
+.btn-green{background:#00c853;color:white}
+.btn-outline{background:white;border:2px solid #0a2a5a;color:#0a2a5a}
+#preview{width:100%;border-radius:12px;margin-top:12px;display:none;max-height:350px;object-fit:contain;background:#000}
+#ocrStatus{background:#e6f0ff;padding:12px;border-radius:8px;margin-top:12px;display:none;font-size:14px}
+.qcm-question{border-left:4px solid #0a2a5a;padding:12px;margin:16px 0;background:#f9fbff;border-radius:0 10px 10px 0}
+.qcm-option{padding:12px;border:1px solid #ddd;border-radius:8px;margin:8px 0;cursor:pointer}
+.qcm-option.correct{background:#d4edda;border-color:#00c853}
+.qcm-option.wrong{background:#f8d7da;border-color:red}
+</style>
+</head>
+<body>
+<header>
+<img src="logo.png" class="logo" alt="logo">
+<h1>NESI_EDUC - QCM Scanner</h1>
+<p style="opacity:.8;font-size:13px">Photo -> QCM auto • 100% Offline</p>
+</header>
+<div id="licenseBanner"></div>
+<div class="container" id="appContent">
+<div class="card">
+<h3>1. Photo du cours</h3>
+<label class="btn btn-primary">📷 PRENDRE PHOTO<input type="file" id="fileInput" accept="image/*" capture="environment" hidden></label>
+<img id="preview"><div id="ocrStatus"></div>
+<button class="btn btn-green" id="btnGenerate" style="display:none;margin-top:12px" onclick="generateQCM()">⚡ Generer QCM</button>
+</div>
+<div class="card" id="qcmContainer" style="display:none"><div id="qcmList"></div><button class="btn btn-primary" onclick="corrigerQCM()">✅ Corriger</button></div>
+<div class="card" id="scoreBox" style="display:none;text-align:center"><h2 id="scoreText"></h2><p id="scoreMsg"></p><button class="btn btn-primary" onclick="location.reload()">🔄 Nouveau</button></div>
+</div>
+<script>
+// LICENCE SYSTEM
+function genChecksum(p,c){let s=0;for(let x of(p+c))s+=x.charCodeAt(0);return(s%36).toString(36).toUpperCase()}
+function validerCle(k){k=k.trim().toLowerCase();let p=k.split('_');if(p.length!=3||p[0]!='nesi')return{valid:false,reason:"Format ex: nesi_3e_A7K9P"};if(p[2].length!=5)return{valid:false,reason:"5 car apres _"};let code=p[2].substring(0,4),chk=p[2].substring(4,5).toUpperCase(),pref=`nesi_${p[1]}`;if(chk!=genChecksum(pref,code.toUpperCase()))return{valid:false,reason:"Cle fausse"};return{valid:true,classe:p[1],duree:30}}
+function checkLicense(){let key=localStorage.getItem("nesi_license"),date=localStorage.getItem("nesi_license_date"),duree=parseInt(localStorage.getItem("nesi_license_duree")||"30"),banner=document.getElementById('licenseBanner');if(!key||!date){showLicenseScreen();return false}let act=new Date(date).getTime(),now=Date.now(),exp=act+duree*24*60*60*1000,jours=Math.ceil((exp-now)/(24*60*60*1000));if(now>exp){showLicenseScreen(`Licence expiree ${key.toUpperCase()} depuis ${Math.abs(jours)}j`);return false}banner.style.display='block';banner.innerHTML=`✅ ${key.toUpperCase()} | ${jours}j restants`;return true}
+function showLicenseScreen(m=""){document.getElementById('appContent').innerHTML=`<div class="card"><h2 style="color:#0a2a5a;text-align:center">🔒 Activation</h2>${m?`<p style="background:#f8d7da;padding:10px;border-radius:8px">${m}</p>`:""}<input id="keyInput" placeholder="nesi_3e_XXXX" style="width:100%;padding:14px;border:2px solid #0a2a5a;border-radius:10px;margin-top:10px;font-family:monospace;text-transform:uppercase"><button onclick="activer()" class="btn btn-primary" style="margin-top:12px">ACTIVER 30 JOURS</button><div style="background:#e6f0ff;padding:12px;border-radius:8px;margin-top:12px;font-size:13px">Pas de cle? MTN MoMo 680944328 - 1000F/mois - WhatsApp preuve</div></div>`}
+function activer(){let i=document.getElementById('keyInput').value,r=validerCle(i);if(!r.valid){alert(r.reason);return}localStorage.setItem("nesi_license",i.toLowerCase());localStorage.setItem("nesi_license_date",new Date().toISOString());localStorage.setItem("nesi_license_duree",r.duree);localStorage.setItem("nesi_classe",r.classe);alert("Active! "+r.classe+" "+r.duree+"j");location.reload()}
+
+// QCM LOGIC
+let extractedText="",questions=[],answers={};
+document.getElementById('fileInput').addEventListener('change',async e=>{if(!checkLicense())return;let f=e.target.files[0];if(!f)return;let p=document.getElementById('preview');p.src=URL.createObjectURL(f);p.style.display='block';let s=document.getElementById('ocrStatus');s.style.display='block';s.innerHTML="Lecture...";try{let r=await Tesseract.recognize(f,'fra',{logger:m=>{if(m.status==='recognizing text')s.innerHTML=`Lecture ${Math.round(m.progress*100)}%`}});extractedText=r.data.text;s.innerHTML=`✅ ${extractedText.length} car: ${extractedText.substring(0,120)}...`;document.getElementById('btnGenerate').style.display='block'}catch(err){s.innerHTML="Erreur "+err.message}});
+function generateQCM(){if(!checkLicense())return;let sens=extractedText.split(/[.!?\n]/).map(s=>s.trim()).filter(s=>s.length>30).slice(0,8);questions=sens.map((sen,idx)=>{let w=sen.split(' ').filter(x=>x.length>4);if(w.length<3)return null;let ans=w[Math.floor(w.length/2)].replace(/[^a-zA-ZÀ-ÿ]/g,'');let opts=[ans,"le systeme","la methode","le principe"].sort(()=>Math.random()-0.5);return{id:idx,question:`Complete: "${sen.replace(ans,'____')}"`,options:opts,correct:ans,explanation:sen}}).filter(q=>q);let list=document.getElementById('qcmList');list.innerHTML="";document.getElementById('qcmContainer').style.display='block';questions.forEach((q,i)=>{let d=document.createElement('div');d.className='qcm-question';d.innerHTML=`<strong>Q${i+1} ${q.question}</strong>`+q.options.map(o=>`<div class="qcm-option" data-q="${q.id}" data-opt="${o}" onclick="selectOption(this)">${o}</div>`).join('');list.appendChild(d)});}
+function selectOption(el){let q=el.dataset.q;document.querySelectorAll(`[data-q="${q}"]`).forEach(o=>o.style.background='white');el.style.background='#e6f0ff';answers[q]=el.dataset.opt}
+function corrigerQCM(){let sc=0;questions.forEach(q=>{document.querySelectorAll(`[data-q="${q.id}"]`).forEach(o=>{if(o.dataset.opt==q.correct)o.classList.add('correct');else if(o.dataset.opt==answers[q.id])o.classList.add('wrong')});if(answers[q.id]==q.correct)sc++});document.getElementById('scoreBox').style.display='block';document.getElementById('scoreText').innerText=`${sc}/${questions.length}`}
+window.addEventListener('DOMContentLoaded',()=>{setTimeout(checkLicense,300)});
+</script>
+</body>
+</html>
